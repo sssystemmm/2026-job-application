@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Scanner — Marcel Darienzo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --score-high: #10b981;
+      --score-mid: #f59e0b;
+      --score-low: #ef4444;
+    }
+    body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+    .score-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 2.5rem; height: 2.5rem; border-radius: 50%;
+      font-weight: 700; font-size: 0.9rem;
+    }
+    .score-high { background: #064e3b; color: #34d399; border: 2px solid #10b981; }
+    .score-mid  { background: #451a03; color: #fbbf24; border: 2px solid #f59e0b; }
+    .score-low  { background: #3f0f0f; color: #f87171; border: 2px solid #ef4444; }
+    .score-none { background: #1e293b; color: #64748b; border: 2px solid #334155; }
+    .job-card { transition: all 0.2s ease; }
+    .job-card:hover { border-color: #475569; }
+    .tag { display: inline-block; background: #1e293b; border: 1px solid #334155; border-radius: 0.25rem; padding: 0.1rem 0.5rem; font-size: 0.7rem; color: #94a3b8; }
+    .source-tag { background: #0f2041; border-color: #1d4ed8; color: #93c5fd; }
+    .expand-content { display: none; }
+    .expand-content.open { display: block; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .cover-letter-box {
+      white-space: pre-wrap;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      font-size: 0.875rem;
+      line-height: 1.7;
+      color: #cbd5e1;
+    }
+    select, input[type=range] { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; border-radius: 0.375rem; padding: 0.25rem 0.5rem; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-slate-700 bg-slate-900 sticky top-0 z-10">
+    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+      <div>
+        <h1 class="text-xl font-bold text-white">Job Scanner</h1>
+        <p class="text-xs text-slate-400">Product Design Lead · Remote/Hybrid · São Paulo or Barcelona</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="scan-status-text" class="text-sm text-slate-400"></span>
+        <button id="scan-btn" onclick="triggerScan()"
+          class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+          Scan Now
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Filters -->
+  <div class="max-w-6xl mx-auto px-4 pt-6 pb-2">
+    <div class="flex flex-wrap items-center gap-4 bg-slate-800 border border-slate-700 rounded-xl p-4">
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-slate-400 whitespace-nowrap">Min score</label>
+        <input type="range" id="min-score" min="0" max="10" step="0.5" value="5"
+          oninput="document.getElementById('score-val').textContent=this.value; applyFilters()"
+          class="w-28 accent-indigo-500" />
+        <span id="score-val" class="text-sm text-slate-300 w-5">5</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-slate-400">Source</label>
+        <select id="source-filter" onchange="applyFilters()" class="text-sm">
+          <option value="">All sources</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-slate-400">Sort</label>
+        <select id="sort-by" onchange="applyFilters()" class="text-sm">
+          <option value="score">By score</option>
+          <option value="date">By date</option>
+        </select>
+      </div>
+      <div class="ml-auto text-sm text-slate-400">
+        <span id="count-text">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Job List -->
+  <main class="max-w-6xl mx-auto px-4 py-4 space-y-3" id="job-list">
+    <div class="text-center py-12 text-slate-500" id="empty-state">
+      Loading jobs…
+    </div>
+  </main>
+
+  <!-- Cover Letter Modal -->
+  <div id="modal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4">
+    <div class="bg-slate-800 border border-slate-600 rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-semibold text-white" id="modal-title">Cover Letter</h2>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+      </div>
+      <div class="cover-letter-box" id="modal-content"></div>
+      <button onclick="copyCoverLetter()"
+        class="mt-4 bg-slate-700 hover:bg-slate-600 text-sm text-slate-200 px-4 py-2 rounded-lg transition">
+        Copy to clipboard
+      </button>
+    </div>
+  </div>
+
+<script>
+let allJobs = [];
+
+function scoreClass(score) {
+  if (score === null || score === undefined) return 'score-none';
+  if (score >= 7) return 'score-high';
+  if (score >= 5) return 'score-mid';
+  return 'score-low';
+}
+
+function scoreDisplay(score) {
+  if (score === null || score === undefined) return '?';
+  return score.toFixed(1);
+}
+
+function sanitize(str) {
+  if (!str) return '';
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function renderJob(job, idx) {
+  const sc = job.score;
+  const cls = scoreClass(sc);
+  const matches = (job.key_matches || []).slice(0, 4).map(s => `<span class="tag">${sanitize(s)}</span>`).join(' ');
+  const gaps = (job.gaps || []).slice(0, 2).map(s => `<span class="tag" style="border-color:#7c3aed;color:#c4b5fd">${sanitize(s)}</span>`).join(' ');
+  const hasCoverLetter = job.cover_letter && job.cover_letter.length > 10;
+  const hasDetail = job.detailed_analysis && job.detailed_analysis.length > 10;
+
+  return `
+  <div class="job-card bg-slate-800 border border-slate-700 rounded-xl p-4" data-id="${job.id}">
+    <div class="flex gap-4 items-start">
+      <div class="shrink-0">
+        <div class="score-badge ${cls}">${sanitize(scoreDisplay(sc))}</div>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <a href="${sanitize(job.url)}" target="_blank" rel="noopener"
+              class="font-semibold text-white hover:text-indigo-300 transition text-sm">${sanitize(job.title)}</a>
+            <p class="text-slate-300 text-sm">${sanitize(job.company)} &nbsp;·&nbsp; <span class="text-slate-400">${sanitize(job.location || 'Remote')}</span></p>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <span class="tag source-tag">${sanitize(job.source)}</span>
+            ${job.job_type ? `<span class="tag">${sanitize(job.job_type)}</span>` : ''}
+          </div>
+        </div>
+
+        ${job.rationale ? `<p class="text-slate-400 text-xs mt-2 leading-relaxed">${sanitize(job.rationale)}</p>` : ''}
+
+        ${matches || gaps ? `
+        <div class="flex flex-wrap gap-1 mt-2">
+          ${matches}
+          ${gaps}
+        </div>` : ''}
+
+        ${hasDetail || hasCoverLetter ? `
+        <div class="mt-3 flex gap-2 flex-wrap">
+          ${hasDetail ? `<button onclick="toggleDetail('${job.id}')"
+            class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1 rounded-lg transition">
+            View Analysis
+          </button>` : ''}
+          ${hasCoverLetter ? `<button onclick="openCoverLetter('${job.id}', '${sanitize(job.title)} @ ${sanitize(job.company)}')"
+            class="text-xs bg-indigo-800 hover:bg-indigo-700 text-indigo-200 px-3 py-1 rounded-lg transition">
+            Cover Letter ✦
+          </button>` : ''}
+        </div>
+        <div id="detail-${job.id}" class="expand-content mt-3 text-xs text-slate-300 leading-relaxed bg-slate-900 rounded-lg p-3 border border-slate-700">
+          ${sanitize(job.detailed_analysis)}
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function applyFilters() {
+  const minScore = parseFloat(document.getElementById('min-score').value);
+  const source = document.getElementById('source-filter').value;
+  const sortBy = document.getElementById('sort-by').value;
+
+  let filtered = allJobs.filter(j => {
+    if (source && j.source !== source) return false;
+    const s = j.score !== null && j.score !== undefined ? j.score : 0;
+    return s >= minScore;
+  });
+
+  if (sortBy === 'date') {
+    filtered.sort((a, b) => new Date(b.fetched_at || 0) - new Date(a.fetched_at || 0));
+  } else {
+    filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
+  }
+
+  document.getElementById('count-text').textContent = `${filtered.length} jobs`;
+
+  const list = document.getElementById('job-list');
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="text-center py-12 text-slate-500">No jobs match the current filters. Try running a scan or lowering the score threshold.</div>`;
+    return;
+  }
+  list.innerHTML = filtered.map((j, i) => renderJob(j, i)).join('');
+}
+
+function populateSourceFilter() {
+  const sources = [...new Set(allJobs.map(j => j.source))].sort();
+  const sel = document.getElementById('source-filter');
+  sel.innerHTML = '<option value="">All sources</option>' +
+    sources.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+
+async function loadJobs() {
+  try {
+    const res = await fetch('/api/jobs?limit=500');
+    const data = await res.json();
+    allJobs = data.jobs || [];
+    populateSourceFilter();
+    applyFilters();
+    if (allJobs.length === 0) {
+      document.getElementById('empty-state').textContent = 'No jobs yet. Click "Scan Now" to start.';
+    }
+  } catch (e) {
+    document.getElementById('job-list').innerHTML =
+      '<div class="text-center py-12 text-red-400">Failed to load jobs.</div>';
+  }
+}
+
+async function triggerScan() {
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  try {
+    await fetch('/api/scan', { method: 'POST' });
+    pollStatus();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Scan Now';
+  }
+}
+
+function pollStatus() {
+  const btn = document.getElementById('scan-btn');
+  const statusEl = document.getElementById('scan-status-text');
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/scan/status');
+      const data = await res.json();
+      statusEl.textContent = data.message || '';
+      if (!data.running) {
+        clearInterval(interval);
+        btn.disabled = false;
+        btn.textContent = 'Scan Now';
+        await loadJobs();
+      }
+    } catch (e) {
+      clearInterval(interval);
+      btn.disabled = false;
+      btn.textContent = 'Scan Now';
+    }
+  }, 1500);
+}
+
+function toggleDetail(jobId) {
+  const el = document.getElementById(`detail-${jobId}`);
+  if (el) el.classList.toggle('open');
+}
+
+let currentCoverLetter = '';
+function openCoverLetter(jobId, label) {
+  const job = allJobs.find(j => j.id === jobId);
+  if (!job || !job.cover_letter) return;
+  currentCoverLetter = job.cover_letter;
+  document.getElementById('modal-title').textContent = `Cover Letter — ${label}`;
+  document.getElementById('modal-content').textContent = job.cover_letter;
+  const modal = document.getElementById('modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeModal() {
+  const modal = document.getElementById('modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function copyCoverLetter() {
+  navigator.clipboard.writeText(currentCoverLetter).then(() => {
+    const btn = event.target;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy to clipboard', 2000);
+  });
+}
+
+document.getElementById('modal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// Poll scan status on load to resume if a scan is running
+async function checkInitialStatus() {
+  try {
+    const res = await fetch('/api/scan/status');
+    const data = await res.json();
+    if (data.running) {
+      document.getElementById('scan-btn').disabled = true;
+      document.getElementById('scan-btn').textContent = 'Scanning…';
+      document.getElementById('scan-status-text').textContent = data.message || '';
+      pollStatus();
+    }
+  } catch {}
+}
+
+loadJobs();
+checkInitialStatus();
+</script>
+</body>
+</html>
