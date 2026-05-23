@@ -7,9 +7,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.requests import Request
+from fastapi.responses import FileResponse, HTMLResponse
 
 from .config import settings
 from .database import (
@@ -24,8 +22,7 @@ from .matcher import Matcher
 from .models import ScanStatus
 from .scanner import deduplicate, fetch_all, filter_jobs
 
-TEMPLATES_DIR = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+DASHBOARD_HTML = Path(__file__).parent / "templates" / "dashboard.html"
 
 _scan_status = ScanStatus()
 _scheduler = AsyncIOScheduler()
@@ -83,8 +80,8 @@ app = FastAPI(title="Job Scanner", lifespan=lifespan)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+async def dashboard():
+    return FileResponse(DASHBOARD_HTML, media_type="text/html")
 
 
 @app.get("/api/jobs")
