@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import os
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from .config import settings
 from .database import (
@@ -23,6 +24,7 @@ from .models import ScanStatus
 from .scanner import deduplicate, fetch_all, filter_jobs
 
 DASHBOARD_HTML = Path(__file__).parent / "templates" / "dashboard.html"
+_ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 _scan_status = ScanStatus()
 _scheduler = AsyncIOScheduler()
@@ -70,10 +72,12 @@ async def run_scan() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db(settings.db_path)
-    _scheduler.add_job(run_scan, "cron", hour=settings.scan_hour, id="daily_scan")
-    _scheduler.start()
+    if not _ON_VERCEL:
+        _scheduler.add_job(run_scan, "cron", hour=settings.scan_hour, id="daily_scan")
+        _scheduler.start()
     yield
-    _scheduler.shutdown(wait=False)
+    if not _ON_VERCEL and _scheduler.running:
+        _scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title="Job Scanner", lifespan=lifespan)
@@ -116,3 +120,15 @@ async def get_cover_letter(job_id: str):
     if not analysis.cover_letter:
         raise HTTPException(status_code=404, detail="No cover letter generated for this job")
     return {"cover_letter": analysis.cover_letter, "job_id": job_id}
+
+
+# Vercel Cron Job endpoint — called daily at 08:00 UTC
+# Secured so only Vercel's cron runner can trigger it
+@app.get("/api/cron/scan")
+async def cron_scan(request: Request):
+    auth = request.headers.get("authorization", "")
+    cron_secret = os.environ.get("CRON_SECRET", "")
+    if cron_secret and auth != f"Bearer {cron_secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    asyncio.create_task(run_scan())
+    return JSONResponse({"status": "scan triggered"})

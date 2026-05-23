@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Vercel sets VERCEL=1 automatically; use /tmp for ephemeral SQLite
+_on_vercel = bool(os.environ.get("VERCEL"))
+_default_db = Path("/tmp/jobs.db") if _on_vercel else Path("data/jobs.db")
 
 
 class Settings(BaseSettings):
@@ -23,7 +28,7 @@ class Settings(BaseSettings):
     concurrency_limit: int = 5
     infojobs_api_key: str = Field(default="")
 
-    db_path: Path = Path("data/jobs.db")
+    db_path: Path = Field(default=_default_db)
 
 
 settings = Settings()
